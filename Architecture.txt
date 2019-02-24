@@ -1,0 +1,34 @@
+Topic manager:
+    - responsible for handling user subscription
+    - broadcast of new information
+
+
+User:
+    - subscribe
+    - unsubscribe
+    - post
+    - fetch_news
+
+Q: What are the different nodes? Different users?
+
+TopicManager -> TopicManager:
+{:users, user_list}
+{:master, self()}
+
+User -> TopicManager:
+{:subscribe, topic_name, user_name}
+{:unsubscribe, topic_name, user_name}
+{:post, topic_name, user_name, content}
+
+TopicManager -> User:
+{:broadcast, topic_name, content}
+{:register, topic_name, self()}
+
+TopicManager -> Nodes:
+{:replicate, user_list} 
+    to replicate a topic manager on other nodes 
+
+Initialize topic manager:
+- add itself to process registry under topic name
+- replicate on all other nodes
+
