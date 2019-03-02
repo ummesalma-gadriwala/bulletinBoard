@@ -1,34 +1,23 @@
-Topic manager:
-    - responsible for handling user subscription
-    - broadcast of new information
+My design is split into two modules, User and TopicManager.
+
+    Module: User
+User.start(user_name): Creates a new user by spawning a thread and adding it to the process registry under the user_name.
+User.subscribe(user_name, topic_name): Subscribes a user to the topic by sending a message {:subscribe, user_name, topic_name} to the user_name thread. If the topic does not exist, a new thread is spawned and registered in the process registry under topic_name.
+User.unsubscribe(user_name, topic_name): Unsubscribes a user from the topic by sending a message {:unsubscribe, user_name, topic_name} to the user_name thread.
+User.post(user_name, topic_name, content): Posts content by user for the topic by sending a message {:post, user_name, topic_name, content} to the user_name thread.
+User.fetch_all(user_name): Displays all news from all subscribed topics posted on the bulletin board by sending a message {:fetch} to the username thread.
+User.run(): Recursively runs a `receive do .. end` block to receive messages sent to a user_name thread.
+
+The following messages are sent from the User to the TopicManager module:
+- {:subscribe, topic_name, user_name}: subscribe user_name to topic_name.
+- {:unsubscribe, topic_name, user_name}: unsubscribe user_name to topic_name.
+- {:post, topic_name, user_name, content}: post content by user_name to topic_name.
+
+    Module: TopicManager
+The following messages are exchanged between master and secondary TopicManagers:
+- {:nodedown}: sent when a node crashes; if node was master topic manager, a secondary topic manager takes over.
+- {:secondarymanager, secondary_topic_manager_list}: sent by the master node to update the secondary_topic_manager_list on a secondary node.
 
 
-User:
-    - subscribe
-    - unsubscribe
-    - post
-    - fetch_news
-
-Q: What are the different nodes? Different users?
-
-TopicManager -> TopicManager:
-{:users, user_list}
-{:master, self()}
-
-User -> TopicManager:
-{:subscribe, topic_name, user_name}
-{:unsubscribe, topic_name, user_name}
-{:post, topic_name, user_name, content}
-
-TopicManager -> User:
-{:broadcast, topic_name, content}
-{:register, topic_name, self()}
-
-TopicManager -> Nodes:
-{:replicate, user_list} 
-    to replicate a topic manager on other nodes 
-
-Initialize topic manager:
-- add itself to process registry under topic name
-- replicate on all other nodes
-
+The following messages are sent from TopicManager to User:
+- {:broadcast, topic_name, content}: For each time some content is posted by some user, a broadcast message is sent to all subscribed users by the TopicManager for topic_name.
