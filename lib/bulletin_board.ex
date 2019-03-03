@@ -102,14 +102,12 @@ defmodule TopicManager do
     # spawn secondary topic managers on all nodes
     IO.puts "in start"
     nodes = Node.list()
-    IO.puts "nodes"
-    IO.inspect nodes
 
     secondary_topic_manager_list = for node <- nodes do
-      Node.spawn(node, TopicManager, :run, [topic_name, user_map, []])
+      Node.monitor(node, true)
+      pid = Node.spawn(node, TopicManager, :run, [topic_name, user_map, []])
+      :rpc.call(node, TopicManager, :run, [topic_name, user_map, []])
     end
-    IO.inspect "secondary_topic_manager_list"
-    IO.inspect secondary_topic_manager_list
 
     for secondary_topic_manager <- secondary_topic_manager_list do
       send(secondary_topic_manager, {:secondarymanager, :update, secondary_topic_manager_list})
@@ -151,13 +149,24 @@ defmodule TopicManager do
 
       {:nodedown, node} ->
         IO.puts "nodedown!"
+        master_topic_manager = :global.whereis_name(topic_name)
         # is the master node down?
-
-        # master node is down, initiate take over protocol
-
-        # master node is up, remove node from secondary list
-        secondary_topic_manager_list = secondary_topic_manager_list -- [node]
-        run(topic_name, user_map, secondary_topic_manager_list)
+        case master_topic_manager do
+          :undefined -> 
+            # master node is down, initiate take over protocol
+            # register in the process registry as master
+            IO.puts "master down"
+            IO.inspect self()
+            IO.inspect Node.self()
+            :global.register_name(topic_name, self())
+            secondary_topic_manager_list = secondary_topic_manager_list -- [Node.self()]
+            run(topic_name, user_map, secondary_topic_manager_list)
+          _ ->
+            # master node is up, remove node from secondary list
+            IO.puts "master up"
+            secondary_topic_manager_list = secondary_topic_manager_list -- [node]
+            run(topic_name, user_map, secondary_topic_manager_list)
+        end        
     end
   end
 
@@ -212,5 +221,6 @@ end
 # User.fetch_news("Alice")
 # User.fetch_news("Bob")
 # User.unsubscribe("Bob", "computing")
-# Node.connect(:alpha@UmmeSalmaGadriwala)
-# Node.monitor(:alpha@UmmeSalmaGadriwala, true)
+# Node.connect(:beta@UmmeSalmaGadriwala)
+# Node.monitor(:beta@UmmeSalmaGadriwala, true)
+# Node.monitor(:gamma@UmmeSalmaGadriwala, true)
