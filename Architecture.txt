@@ -1,23 +1,25 @@
-My design is split into two modules, User and TopicManager.
-
+My design is split into two modules, User and TopicManager. I assume all nodes in the system are connected and monitoring each other.
     Module: User
-User.start(user_name): Creates a new user by spawning a thread and adding it to the process registry under the user_name.
-User.subscribe(user_name, topic_name): Subscribes a user to the topic by sending a message {:subscribe, user_name, topic_name} to the user_name thread. If the topic does not exist, a new thread is spawned and registered in the process registry under topic_name.
-User.unsubscribe(user_name, topic_name): Unsubscribes a user from the topic by sending a message {:unsubscribe, user_name, topic_name} to the user_name thread.
-User.post(user_name, topic_name, content): Posts content by user for the topic by sending a message {:post, user_name, topic_name, content} to the user_name thread.
-User.fetch_all(user_name): Displays all news from all subscribed topics posted on the bulletin board by sending a message {:fetch} to the username thread.
-User.run(): Recursively runs a `receive do .. end` block to receive messages sent to a user_name thread.
-
+•	User.start(user_name): Creates a new user by spawning a thread and adding it to the process registry under the user_name.
+•	User.subscribe(user_name, topic_name): Subscribes a user to the topic by sending {:subscribe, user_name, topic_name} to the user_name thread. If the topic does not exist, a new thread is spawned and registered in the process registry under topic_name.
+•	User.unsubscribe(user_name, topic_name): Unsubscribes a user from the topic by sending {:unsubscribe, user_name, topic_name} to the user_name thread.
+•	User.post(user_name, topic_name, content): Posts content by user for the topic by sending {:post, user_name, topic_name, content} to the user_name thread.
+•	User.fetch_all(user_name): Displays all news from all subscribed topics posted on the bulletin board by sending {:fetch} to the user_name thread.
+•	User.run(): Recursively runs a `receive do ... end` block to receive messages sent to the user_name thread.
 The following messages are sent from the User to the TopicManager module:
-- {:subscribe, topic_name, user_name}: subscribe user_name to topic_name.
-- {:unsubscribe, topic_name, user_name}: unsubscribe user_name to topic_name.
-- {:post, topic_name, user_name, content}: post content by user_name to topic_name.
-
+•	{:subscribe, topic_name, user_name}: subscribe user_name to topic_name.
+•	{:unsubscribe, topic_name, user_name}: unsubscribe user_name to topic_name.
+•	{:post, topic_name, user_name, content}: post content by user_name to topic_name.
     Module: TopicManager
+•	TopicManager.start(topic_name, user_map): Start master topic manager. Spawns secondary topic managers on all connected nodes. Send a list of all secondary topic manager PIDs to all secondary topic managers. 
+•	TopicManager.secondaryStart(topic_name, user_map, master_node): Start secondary topic managers.
+•	TopicManager.run(topic_name, user_map, secondary_topic_manager_list): Recursive method to receive messages from User and other nodes in the system.
+•	TopicManager.secondaryRun(topic_name, user_map, secondary_topic_manager_list): Recursive method to receives messages from master topic manager and other nodes in the system.
+•	TopicManager.subscribe(user_name, topic_name, user_map, secondary_topic_manager_list) and TopicManager.unsubscribe(user_name, topic_name, user_map, secondary_topic_manager_list): Updates the user_map with user_name. Sends message to all secondary managers to update their user_map.
+•	TopicManager.broadcast(topic_name, content, user_map, secondary_topic_manager_list): Master topic manager sends content to all subscribed users in user_map.
 The following messages are exchanged between master and secondary TopicManagers:
-- {:nodedown}: sent when a node crashes; if node was master topic manager, a secondary topic manager takes over.
-- {:secondarymanager, secondary_topic_manager_list}: sent by the master node to update the secondary_topic_manager_list on a secondary node.
-
-
+•	{:nodedown, node}: Sent when a node crashes; if node was master topic manager, a secondary topic manager takes over.
+•	{:secondarymanager, :update, secondary_topic_manager_list}: Sent by the master topic manager to update the list of secondary topic manager PIDs on secondary nodes.
+•	{:secondarymanager, :subscribe, user_name} and {:secondarymanager, :unsubscribe, user_name}: Sent by the master topic manager when a new user subscribes or unsubscribes to the topic.
 The following messages are sent from TopicManager to User:
-- {:broadcast, topic_name, content}: For each time some content is posted by some user, a broadcast message is sent to all subscribed users by the TopicManager for topic_name.
+•	{:broadcast, topic_name, content}: For each time some content is posted by some user, a broadcast message is sent to all users subscribed to topic_name by the TopicManager.
