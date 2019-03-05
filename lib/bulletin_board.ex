@@ -10,8 +10,6 @@ defmodule User do
 
   def run() do
     receive do
-      {:ok, message} ->
-        IO.puts message
       {:subscribe, user_name, topic_name} ->
         master_topic_manager = :global.whereis_name(topic_name)
         send(master_topic_manager, 
@@ -41,12 +39,9 @@ defmodule User do
     user_pid = :global.whereis_name(user_name)
     # does topic already exist?
     master_topic_manager = :global.whereis_name(topic_name)
-    IO.puts "does topic exist?"
-    IO.inspect master_topic_manager
     case master_topic_manager do
       :undefined ->
         # no, start new topic
-        IO.puts "no, start new topic"
         topic_pid = spawn(TopicManager, :start, [topic_name, []])
         # register topic in the process registry as master
         :global.register_name(topic_name, topic_pid)
@@ -100,78 +95,86 @@ defmodule TopicManager do
 
   def start(topic_name, user_map) do
     # spawn secondary topic managers on all nodes
-    IO.puts "in start"
     nodes = Node.list()
 
     secondary_topic_manager_list = for node <- nodes do
       Node.monitor(node, true)
-      pid = Node.spawn(node, TopicManager, :run, [topic_name, user_map, []])
-      :rpc.call(node, TopicManager, :run, [topic_name, user_map, []])
+      Node.spawn(node, TopicManager, :secondaryStart, [topic_name, user_map, Node.self()])
     end
 
     for secondary_topic_manager <- secondary_topic_manager_list do
       send(secondary_topic_manager, {:secondarymanager, :update, secondary_topic_manager_list})
     end
 
-    IO.puts "run in start"
     run(topic_name, user_map, secondary_topic_manager_list)
   end
 
+  def secondaryStart(topic_name, user_map, master_node) do
+    Node.monitor(master_node, true)
+    secondaryRun(topic_name, user_map, [])
+  end
+
   def run(topic_name, user_map, secondary_topic_manager_list) do
-    IO.puts "in run"
-    # IO.inspect self()
     receive do
-      {:secondarymanager, :update, secondary_topic_manager_list} -> 
-        IO.puts "updating secondary node"
-        IO.inspect secondary_topic_manager_list
-        run(topic_name, user_map, secondary_topic_manager_list)
-
-      {:secondarymanager, :subscribe, user_name} -> 
-        IO.puts "subscribe secondary node"
-        user_map = user_map ++ [user_name]
-        run(topic_name, user_map, secondary_topic_manager_list)
-
-      {:secondarymanager, :unsubscribe, user_name} ->
-        IO.puts "unsubscribe secondary node" 
-        user_map = user_map -- [user_name]
-        run(topic_name, user_map, secondary_topic_manager_list)
-
       {:subscribe, topic_name, user_name} -> 
-        IO.puts "subscribe"
         subscribe(user_name, topic_name, user_map, secondary_topic_manager_list)
 
       {:unsubscribe, topic_name, user_name} ->
-        IO.puts "unsubscribe"
         unsubscribe(user_name, topic_name, user_map, secondary_topic_manager_list)
 
       {:post, topic_name, user_name, content} ->
         broadcast(topic_name, content, user_map, secondary_topic_manager_list)
 
       {:nodedown, node} ->
-        IO.puts "nodedown!"
         master_topic_manager = :global.whereis_name(topic_name)
         # is the master node down?
         case master_topic_manager do
           :undefined -> 
             # master node is down, initiate take over protocol
-            # register in the process registry as master
-            IO.puts "master down"
-            IO.inspect self()
-            IO.inspect Node.self()
-            :global.register_name(topic_name, self())
+            # re-register in the process registry as master
+            :global.re_register_name(topic_name, self())
             secondary_topic_manager_list = secondary_topic_manager_list -- [Node.self()]
             run(topic_name, user_map, secondary_topic_manager_list)
           _ ->
             # master node is up, remove node from secondary list
-            IO.puts "master up"
             secondary_topic_manager_list = secondary_topic_manager_list -- [node]
             run(topic_name, user_map, secondary_topic_manager_list)
-        end        
+        end
+    end
+  end
+
+  def secondaryRun(topic_name, user_map, secondary_topic_manager_list) do
+    receive do
+      {:secondarymanager, :update, secondary_topic_manager_list} -> 
+        secondaryRun(topic_name, user_map, secondary_topic_manager_list)
+
+      {:secondarymanager, :subscribe, user_name} -> 
+        user_map = user_map ++ [user_name]
+        secondaryRun(topic_name, user_map, secondary_topic_manager_list)
+
+      {:secondarymanager, :unsubscribe, user_name} ->
+        user_map = user_map -- [user_name]
+        secondaryRun(topic_name, user_map, secondary_topic_manager_list)
+
+      {:nodedown, node} ->
+        master_topic_manager = :global.whereis_name(topic_name)
+        # is the master node down?
+        case master_topic_manager do
+          :undefined -> 
+            # master node is down, initiate take over protocol
+            # re-register in the process registry as master
+            :global.re_register_name(topic_name, self())
+            secondary_topic_manager_list = secondary_topic_manager_list -- [Node.self()]
+            run(topic_name, user_map, secondary_topic_manager_list)
+          _ ->
+            # master node is up, remove node from secondary list
+            secondary_topic_manager_list = secondary_topic_manager_list -- [node]
+            secondaryRun(topic_name, user_map, secondary_topic_manager_list)
+        end
     end
   end
 
   def subscribe(user_name, topic_name, user_map, secondary_topic_manager_list) do
-    IO.puts "in subscribe"
     # add user to user_map
     user_map = user_map ++ [user_name]
     
@@ -184,7 +187,6 @@ defmodule TopicManager do
   end
 
   def unsubscribe(user_name, topic_name, user_map, secondary_topic_manager_list) do
-    IO.puts "in unsubscribe"
     # remove user from user_map
     user_map = user_map -- [user_name]
 
@@ -197,17 +199,16 @@ defmodule TopicManager do
   end
 
   def broadcast(topic_name, content, user_map, secondary_topic_manager_list) do
-    IO.puts "in broadcast"
-    IO.inspect user_map
     # Send content to all users 
     for user <- user_map do
       user_pid = :global.whereis_name(user)
-      send(user_pid, {:broadcast, topic_name, content})
+      if (user_pid != :undefined) do
+        send(user_pid, {:broadcast, topic_name, content})
+      end
     end
 
     run(topic_name, user_map, secondary_topic_manager_list)
   end
-
 end
 
 
@@ -216,6 +217,7 @@ end
 # User.subscribe("Alice", "computing")
 # User.subscribe("Bob", "computing")
 # User.post("Bob", "computing", "Bob here")
+# User.post("Alice", "computing", "Alice here")
 # User.unsubscribe("Alice", "computing")
 # User.post("Bob", "computing", "Bob here here")
 # User.fetch_news("Alice")
@@ -223,4 +225,8 @@ end
 # User.unsubscribe("Bob", "computing")
 # Node.connect(:beta@UmmeSalmaGadriwala)
 # Node.monitor(:beta@UmmeSalmaGadriwala, true)
-# Node.monitor(:gamma@UmmeSalmaGadriwala, true)
+# Node.monitor(:alpha@UmmeSalmaGadriwala, true)
+# :global.registered_names()
+# :global.whereis_name(:Alice) 
+# :global.whereis_name(:Bob) 
+# :global.whereis_name(:computing) 
